@@ -1,0 +1,93 @@
+# Example of CircleCI config to run Cypress for apps with separate
+# front-end and back-end repositories. It's not full, only related parts.
+
+executors:
+  default:
+    ...
+
+  cypress:
+    working_directory: ~/my-project
+    docker:
+      - image: circleci/ruby:2.6.3-node
+        environment:
+          PG_USER: my-project-backend-user
+          RAILS_ENV: test
+
+      - image: circleci/postgres:10-alpine
+        environment:
+          POSTGRES_USER: my-project-backend-user
+          POSTGRES_DB: my-project-backend-db
+          POSTGRES_PASSWORD: ""
+
+...
+
+jobs:
+	...
+  cypress:
+    executor: cypress
+    steps:
+      - checkout
+
+      - run:
+          name: Installing dependencies
+          command: |
+            sudo apt update
+            sudo apt-get install cmake xvfb libgtk2.0-0 libnotify-dev libgconf-2-4 libnss3 libxss1 libasound2
+
+      - yarn_install_cache
+
+      - run:
+          name: Cloning backend repository
+          command: git clone -b develop git@github.com:sample/my-project-backend.git ~/my-project-backend
+
+      - restore_cache:
+          keys:
+            - *bundle_cache
+
+      - run:
+          name: Installing gems
+          working_directory: ~/my-project-backend
+          command: bundle install --path vendor/bundle
+
+      - save_cache:
+          key: *bundle_cache
+          paths:
+            - ~/my-project-backend/vendor/bundle
+
+      - run:
+          name: Creating database
+          working_directory: ~/my-project-backend
+          command: |
+            bundle exec rails db:create
+            bundle exec rails db:schema:load
+
+      - run:
+          name: Starting backend server
+          working_directory: ~/my-project-backend
+          command: bundle exec rails s
+          background: true
+
+      - run:
+          name: Starting frontend server
+          command: yarn dev
+          background: true
+
+      - run:
+          name: Waiting for frontend server
+          command: yarn wait-on http://localhost:4000/ -t 30000
+
+      - run:
+          name: Running cypress tests
+          command: yarn cypress run --config video=false
+
+      - store_artifacts:
+          name: Saving Cypress screenshots
+          path: ~/my-project/cypress/screenshots
+          destination: /cypress-screenshots
+
+workflows:
+  version: 2.1
+  build:
+    jobs:
+      ...
+      - cypress
